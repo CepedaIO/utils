@@ -1,4 +1,5 @@
 import {ChildProcess, spawn, SpawnOptions} from "child_process";
+import {readStream} from "../funcs/readStream";
 
 function isPromptSpec(obj:any): obj is PromptSpec {
   return typeof obj.prompt === 'string'
@@ -46,6 +47,9 @@ export class MockCLIUser {
   options: MockCLIUserOptions;
   specTimeout: number = 1000;
 
+  stdoutGen: Generator<string>;
+  stderrGen: Generator<string>
+
   constructor(
     public command: string,
     public args: string[],
@@ -58,6 +62,11 @@ export class MockCLIUser {
     } else {
       this.options = _options;
     }
+  }
+
+  private async readStdout() {
+    const output = await this.stdoutGen.next();
+    console.log('From gen:', output.value);
   }
 
   private start() {
@@ -74,35 +83,23 @@ export class MockCLIUser {
         this.options.output(output);
       }
     });
-
+/*
     this.process.stdout.on('data', (data:Buffer) => {
       const output = data.toString('utf-8');
-      if(this.options.output) {
-        this.options.output(output);
-      }
 
-      if(!this.controller) {
-        return;
-      }
-
-      if(this.controller.spec.resolve(output)) {
-        if(this.controller.timer) {
-          clearTimeout(this.controller.timer);
-        }
-
-        this.controller.resolve(output);
-        this.controller = null;
-      }
-    });
+    });*/
   }
 
-  setupController(controller:SpecController) {
+  async setupController(controller:SpecController) {
     this.controller = controller;
 
     if(!this.started) {
       this.start();
     }
-    
+
+    this.stdoutGen = readStream(this.process.stdout);
+    this.stderrGen = readStream(this.process.stderr);
+
     if(this.controller.timeout > 0) {
       this.controller.timer = setTimeout(() => {
         if(this.controller) {
@@ -113,6 +110,8 @@ export class MockCLIUser {
         }
       }, this.controller.timeout);
     }
+
+    await this.readStdout();
   }
 
   test(tuples:Array<
