@@ -1,6 +1,6 @@
 import {ChildProcess, spawn, SpawnOptions} from "child_process";
 
-interface MockCLIUserOptions extends SpawnOptions {
+export interface MockCLIUserOptions extends SpawnOptions {
   output?: (output: string) => void;
 }
 
@@ -9,24 +9,42 @@ export class MockCLIUser {
   waitingFor?:string;
   waitingForNext: boolean;
   willSend?:string[];
-  resolve?:Function;
+  resolve?: Function;
+  reject?: Function;
   prompt?:string;
   sentInput: boolean = false;
   process: ChildProcess;
   timeout: number = 1000;
+  timer: NodeJS.Timer;
+  options: MockCLIUserOptions;
 
   constructor(
     public command: string,
     public args: string[],
-    public options: MockCLIUserOptions
-  ) {}
+    _options: MockCLIUserOptions | string
+  ) {
+    if(typeof _options === "string") {
+      this.options = {
+        cwd: _options
+      };
+    } else {
+      this.options = _options;
+    }
+  }
 
   private start() {
     this.started = true;
     this.process = spawn(this.command, this.args, {
-      stdio: ['pipe', 'pipe', 'ignore'],
+      stdio: 'pipe',
       shell: true,
       ...this.options
+    });
+
+    this.process.stderr.on('data', (data:Buffer) => {
+      const output = data.toString('utf-8');
+      if(this.options.output) {
+        this.options.output(output);
+      }
     });
 
     this.process.stdout.on('data', (data:Buffer) => {
@@ -59,32 +77,45 @@ export class MockCLIUser {
   }
 
   private resolveSend(output: string) {
-    this.resolve(output);
-    this.clear()
+    const resolve = this.resolve;
+    this.clear();
+    resolve(output);
   }
 
   private clear() {
+    if(this.timer) {
+      clearTimeout(this.timer);
+    }
+
     this.resolve = null;
+    this.reject = null;
     this.waitingFor = null;
     this.waitingForNext = false;
     this.sentInput = false;
     this.prompt = null;
     this.willSend = null
+    this.timer = null;
   }
 
   setupResolution(resolve, reject, message) {
     this.resolve = resolve;
+    this.reject = reject;
 
     if(!this.started) {
       this.start();
     }
 
-    setTimeout(() => {
-      if(this.resolve) {
-        reject(new Error(`Waiting for timeout reached: ${message}`));
-        this.clear();
-      }
-    }, this.timeout);
+    if(this.timeout > 0) {
+      this.timer = setTimeout(() => {
+        if(this.reject) {
+          const error = message ? `Waiting for timeout reached: ${message}` : 'Waiting for timeout reached';
+          this.reject(new Error(error));
+
+          this.process.kill();
+          this.clear();
+        }
+      }, this.timeout);
+    }
   }
 
   send(prompt: string, answer?:string | string[], message?:string) {
@@ -99,7 +130,7 @@ export class MockCLIUser {
       this.willSend = [];
     }
 
-    if(this.willSend[this.willSend.length - 1] !== '\x0D') {
+    if(answer && this.willSend[this.willSend.length - 1] !== '\x0D') {
       this.willSend.push('\x0D');
     }
 
@@ -107,7 +138,7 @@ export class MockCLIUser {
   }
 
   test(tuples:Array<[string] | [string, string | string[]] | [string, string | string[], string]>) {
-    return tuples.reduce((tail, tuple) => 
+    return tuples.reduce((tail, tuple) =>
       tail.then(() => this.send.apply(this, tuple))
     , Promise.resolve())
   }
@@ -124,6 +155,10 @@ export class MockCLIUser {
   }
 
   waitTillDone() {
+    if(!this.started) {
+      this.start();
+    }
+
     return new Promise<void>((resolve) => {
       this.process.on('exit', () => resolve());
     });
