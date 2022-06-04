@@ -1,4 +1,3 @@
-import { rejects } from "assert";
 import {ChildProcess, spawn, SpawnOptions} from "child_process";
 
 interface MockCLIUserOptions extends SpawnOptions {
@@ -107,7 +106,7 @@ export class MockCLIUser {
     return new Promise((resolve, reject) => this.setupResolution(resolve, reject, prompt));
   }
 
-  test(tuples:Array<[string] | [string, string] | [string, string, string]>) {
+  test(tuples:Array<[string] | [string, string | string[]] | [string, string | string[], string]>) {
     return tuples.reduce((tail, tuple) => 
       tail.then(() => this.send.apply(this, tuple))
     , Promise.resolve())
