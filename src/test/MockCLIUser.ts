@@ -17,11 +17,14 @@ interface SpecController {
   timeout: number;
   timer?: NodeJS.Timer;
   spec: Spec;
+  prompt?: string;
+  willSend?: string;
 }
 
 interface Spec {
   shouldResolve(output:string): boolean;
   afterResolve?(stdin: Writable): void;
+  rejectWith(): Error;
 }
 
 interface EncounterAllSpec extends Spec {
@@ -50,7 +53,7 @@ export class MockCLIUser {
   constructor(
     public command: string,
     public args: string[],
-    _options: MockCLIUserOptions | string
+    _options: MockCLIUserOptions | string = {}
   ) {
     if(typeof _options === "string") {
       this.options = {
@@ -112,7 +115,8 @@ export class MockCLIUser {
     if(this.controller.timeout > 0) {
       this.controller.timer = setTimeout(() => {
         if(this.controller) {
-          this.controller.reject(new Error('Waiting for timeout reached'));
+          const error = this.controller.spec.rejectWith();
+          this.controller.reject(error);
           this.process.kill();
           this.controller = null;
         }
@@ -177,7 +181,8 @@ export class MockCLIUser {
           },
           afterResolve(stdin: Writable) {
             this.willSend.forEach((chunk) => stdin.write(chunk));
-          }
+          },
+          rejectWith: () => new Error(`Unresolved prompt: ${prompt}`)
         } as PromptSpec,
       })
     );
@@ -195,7 +200,8 @@ export class MockCLIUser {
           }
 
           return spec.prompts.length === 0;
-        }
+        },
+        rejectWith: () => new Error(`Unresolved prompts: ${spec.prompts}`)
       }
 
       return this.setupController({
@@ -211,7 +217,8 @@ export class MockCLIUser {
     return new Promise((resolve, reject) => {
       const spec:WaitingForSpec = {
         prompt: '',
-        shouldResolve: () => true
+        shouldResolve: () => true,
+        rejectWith: () => new Error(`No new message encountered`)
       };
 
       this.setupController({
@@ -226,10 +233,11 @@ export class MockCLIUser {
   waitFor(prompt: string): Promise<string> {
     return new Promise((resolve, reject) => {
       const spec:WaitingForSpec = {
-        prompt: prompt,
+        prompt,
         shouldResolve(output: string): boolean {
           return output.includes(spec.prompt);
-        }
+        },
+        rejectWith: () => new Error(`Unresolved prompt: ${prompt}`)
       }
 
       return this.setupController({
