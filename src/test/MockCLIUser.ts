@@ -1,5 +1,6 @@
 import {ChildProcess, spawn, SpawnOptions} from "child_process";
 import {readStream} from "../funcs/readStream";
+import {Writable} from "stream";
 
 function isPromptSpec(obj:any): obj is PromptSpec {
   return typeof obj.prompt === 'string'
@@ -23,7 +24,8 @@ interface SpecController {
 }
 
 interface Spec {
-  resolve(output:string): boolean;
+  shouldResolve(output:string): boolean;
+  afterResolve?(stdin: Writable): void;
 }
 
 interface EncounterAllSpec extends Spec {
@@ -65,8 +67,28 @@ export class MockCLIUser {
   }
 
   private async readStdout() {
-    const output = await this.stdoutGen.next();
-    console.log('From gen:', output.value);
+    const result = await this.stdoutGen.next();
+    const output = result.value;
+
+    if(this.options.output) {
+      this.options.output(output);
+    }
+
+    if(!this.controller.spec.shouldResolve(output)) {
+      return this.readStdout();
+    }
+
+    if(this.controller.timer) {
+      clearTimeout(this.controller.timer);
+    }
+
+    const controller = this.controller;
+    controller.resolve(output);
+    this.controller = null;
+
+    if(controller.spec.afterResolve) {
+      controller.spec.afterResolve(this.process.stdin);
+    }
   }
 
   private start() {
@@ -76,21 +98,21 @@ export class MockCLIUser {
       shell: true,
       ...this.options
     });
-
+/*
     this.process.stderr.on('data', (data:Buffer) => {
       const output = data.toString('utf-8');
       if(this.options.output) {
         this.options.output(output);
       }
     });
-/*
+
     this.process.stdout.on('data', (data:Buffer) => {
       const output = data.toString('utf-8');
 
     });*/
   }
 
-  async setupController(controller:SpecController) {
+  setupController(controller:SpecController) {
     this.controller = controller;
 
     if(!this.started) {
@@ -103,15 +125,14 @@ export class MockCLIUser {
     if(this.controller.timeout > 0) {
       this.controller.timer = setTimeout(() => {
         if(this.controller) {
-          const error = isPromptSpec(this.controller.spec) ? `Waiting for timeout reached: ${this.controller.spec.prompt}` : 'Waiting for timeout reached';
-          this.controller.reject(new Error(error));
+          this.controller.reject(new Error('Waiting for timeout reached'));
           this.process.kill();
           this.controller = null;
         }
       }, this.controller.timeout);
     }
 
-    await this.readStdout();
+    return this.readStdout();
   }
 
   test(tuples:Array<
@@ -171,11 +192,11 @@ export class MockCLIUser {
         spec: {
           prompt,
           willSend,
-          resolve(output: string): boolean {
-            console.log(output);
-            console.log('prompt:', this.prompt);
-            console.log(output.includes(this.prompt))
+          shouldResolve(output: string): boolean {
             return output.includes(this.prompt);
+          },
+          afterResolve(stdin: Writable) {
+            this.willSend.forEach((chunk) => stdin.write(chunk));
           }
         } as PromptSpec,
       })
@@ -186,7 +207,7 @@ export class MockCLIUser {
     return new Promise((resolve, reject) => {
       const spec:EncounterAllSpec = {
         prompts,
-        resolve(output: string): boolean {
+        shouldResolve(output: string): boolean {
           const filteredPrompts = spec.prompts.filter((prompt) => !output.includes(prompt));
 
           if(filteredPrompts.length !== spec.prompts.length) {
@@ -210,7 +231,7 @@ export class MockCLIUser {
     return new Promise((resolve, reject) => {
       const spec:WaitingForSpec = {
         prompt: '',
-        resolve: () => true
+        shouldResolve: () => true
       };
 
       this.setupController({
@@ -226,7 +247,7 @@ export class MockCLIUser {
     return new Promise((resolve, reject) => {
       const spec:WaitingForSpec = {
         prompt: prompt,
-        resolve(output: string): boolean {
+        shouldResolve(output: string): boolean {
           return output.includes(spec.prompt);
         }
       }

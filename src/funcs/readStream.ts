@@ -1,11 +1,5 @@
 import {Readable} from "stream";
 
-async function signalEnd(stream: Readable) {
-  return new Promise(resolve => {
-    stream.once("end", resolve);
-  });
-}
-
 async function signalReadable(stream: Readable) {
   return new Promise(resolve => {
     stream.once("readable", resolve);
@@ -13,12 +7,9 @@ async function signalReadable(stream: Readable) {
 }
 
 export async function* readStream(stream:Readable) {
-  console.log('ended:', stream.readableEnded);
   if(stream.readableEnded) {
     return;
   }
-
-  await signalReadable(stream);
 
   let val;
   do {
@@ -28,5 +19,6 @@ export async function* readStream(stream:Readable) {
     }
   } while(val);
 
-  yield * await readStream(stream);
+  await signalReadable(stream);
+  yield * readStream(stream);
 }
