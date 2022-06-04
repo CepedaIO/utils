@@ -7,7 +7,13 @@ type PassthruOptions = SpawnOptionsWithoutStdio & {
 /**
  * @description Simple child spawn that inherits process
  */
-export async function run(command: string, args: string[], options: PassthruOptions = {}): Promise<number> {
+export async function run(command: string, args: string[], options: string | PassthruOptions = {}): Promise<number> {
+  if(typeof options === "string") {
+    options = {
+      cwd: options
+    };
+  }
+
   const child = spawn(command, args, {
     stdio: 'inherit',
     ...options
