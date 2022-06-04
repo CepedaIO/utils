@@ -15,6 +15,7 @@ export class MockCLIUser {
   ) {
     this.process = spawn(command, args, {
       stdio: ['pipe', 'pipe', 'inherit'],
+      shell: true,
       ...options
     });
 
@@ -73,6 +74,12 @@ export class MockCLIUser {
     this.setWillSend(answer);
 
     return new Promise((resolve) => this.resolve = resolve);
+  }
+
+  test(tuples:Array<[string] | [string, string] | [string, string, string]>) {
+    return tuples.reduce((tail, tuple) => {
+      return tail.then(() => this.send.apply(this, tuple));
+    }, Promise.resolve())
   }
 
   waitFor(prompt: string, timeout:number = 500): Promise<string> {
