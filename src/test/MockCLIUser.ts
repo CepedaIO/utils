@@ -1,4 +1,9 @@
+import { rejects } from "assert";
 import {ChildProcess, spawn, SpawnOptions} from "child_process";
+
+interface MockCLIUserOptions extends SpawnOptions {
+  output?: (output: string) => void;
+}
 
 export class MockCLIUser {
   waitingFor?:string;
@@ -7,11 +12,12 @@ export class MockCLIUser {
   prompt?:string;
   sentInput: boolean = false;
   process: ChildProcess;
+  timeout: number = 1000;
 
   constructor(
     command: string,
     args: string[],
-    options: SpawnOptions
+    options: MockCLIUserOptions
   ) {
     this.process = spawn(command, args, {
       stdio: ['pipe', 'pipe', 'inherit'],
@@ -25,6 +31,10 @@ export class MockCLIUser {
       }
 
       const output = data.toString('utf-8');
+      if(options.output) {
+        options.output(output);
+      }
+
       if(!this.sentInput && output.includes(this.prompt)) {
         this.sentInput = true;
         this.willSend.forEach((chunk) => this.process.stdin.write(chunk));
@@ -73,16 +83,25 @@ export class MockCLIUser {
 
     this.setWillSend(answer);
 
-    return new Promise((resolve) => this.resolve = resolve);
+    return new Promise((resolve, reject) => {
+      this.resolve = resolve;
+
+      setTimeout(() => {
+        if(this.resolve) {
+          reject(new Error(`Waiting for timeout reached for: ${prompt}`));
+          this.clear();
+        }
+      }, this.timeout);
+    });
   }
 
   test(tuples:Array<[string] | [string, string] | [string, string, string]>) {
-    return tuples.reduce((tail, tuple) => {
-      return tail.then(() => this.send.apply(this, tuple));
-    }, Promise.resolve())
+    return tuples.reduce((tail, tuple) => 
+      tail.then(() => this.send.apply(this, tuple))
+    , Promise.resolve())
   }
 
-  waitFor(prompt: string, timeout:number = 500): Promise<string> {
+  waitFor(prompt: string): Promise<string> {
     this.waitingFor = prompt;
 
     return new Promise((resolve, reject) => {
@@ -90,10 +109,10 @@ export class MockCLIUser {
 
       setTimeout(() => {
         if(this.resolve) {
-          reject(new Error('Waiting for timeout reached!'));
+          reject(new Error(`Waiting for timeout reached for: ${prompt}`));
           this.clear();
         }
-      }, timeout);
+      }, this.timeout);
     });
   }
 
