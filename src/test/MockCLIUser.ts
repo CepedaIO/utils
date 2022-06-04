@@ -41,6 +41,10 @@ export class MockCLIUser {
 
   private resolveSend(output: string) {
     this.resolve(output);
+    this.clear()
+  }
+
+  private clear() {
     this.resolve = null;
     this.waitingFor = null;
     this.sentInput = false;
@@ -71,10 +75,19 @@ export class MockCLIUser {
     return new Promise((resolve) => this.resolve = resolve);
   }
 
-  waitFor(prompt: string): Promise<string> {
+  waitFor(prompt: string, timeout:number = 500): Promise<string> {
     this.waitingFor = prompt;
 
-    return new Promise((resolve) => this.resolve = resolve);
+    return new Promise((resolve, reject) => {
+      this.resolve = resolve
+
+      setTimeout(() => {
+        if(this.resolve) {
+          reject(new Error('Waiting for timeout reached!'));
+          this.clear();
+        }
+      }, timeout);
+    });
   }
 
   waitTillDone() {

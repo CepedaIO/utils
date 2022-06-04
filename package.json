@@ -1,10 +1,11 @@
 {
-  "name": "@vlegm/util",
+  "name": "@vlegm/utils",
   "version": "1.0.0",
-  "description": "",
+  "description": "Collection of utility functions used for vlegm projects",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
+    "prepublishOnly": "yarn build",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "",
