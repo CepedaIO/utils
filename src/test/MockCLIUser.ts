@@ -25,7 +25,7 @@ export class MockCLIUser {
   private start() {
     this.started = true;
     this.process = spawn(this.command, this.args, {
-      stdio: ['pipe', 'pipe', 'inherit'],
+      stdio: ['pipe', 'pipe', 'ignore'],
       shell: true,
       ...this.options
     });
