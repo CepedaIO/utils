@@ -6,7 +6,9 @@ interface MockCLIUserOptions extends SpawnOptions {
 }
 
 export class MockCLIUser {
+  started: boolean = false;
   waitingFor?:string;
+  waitingForNext: boolean;
   willSend?:string[];
   resolve?:Function;
   prompt?:string;
@@ -15,27 +17,30 @@ export class MockCLIUser {
   timeout: number = 1000;
 
   constructor(
-    command: string,
-    args: string[],
-    options: MockCLIUserOptions
-  ) {
-    this.process = spawn(command, args, {
+    public command: string,
+    public args: string[],
+    public options: MockCLIUserOptions
+  ) {}
+
+  private start() {
+    this.started = true;
+    this.process = spawn(this.command, this.args, {
       stdio: ['pipe', 'pipe', 'inherit'],
       shell: true,
-      ...options
+      ...this.options
     });
 
     this.process.stdout.on('data', (data:Buffer) => {
+      const output = data.toString('utf-8');
+      if(this.options.output) {
+        this.options.output(output);
+      }
+
       if(!this.resolve) {
         return;
       }
 
-      const output = data.toString('utf-8');
-      if(options.output) {
-        options.output(output);
-      }
-
-      if(!this.sentInput && output.includes(this.prompt)) {
+      if(this.prompt && !this.sentInput && output.includes(this.prompt)) {
         this.sentInput = true;
         this.willSend.forEach((chunk) => this.process.stdin.write(chunk));
 
@@ -45,6 +50,10 @@ export class MockCLIUser {
       }
 
       if(this.waitingFor && output.includes(this.waitingFor)) {
+        this.resolveSend(output);
+      }
+
+      if(this.waitingForNext) {
         this.resolveSend(output);
       }
     });
@@ -58,12 +67,31 @@ export class MockCLIUser {
   private clear() {
     this.resolve = null;
     this.waitingFor = null;
+    this.waitingForNext = false;
     this.sentInput = false;
     this.prompt = null;
     this.willSend = null
   }
 
-  private setWillSend(answer?:string | string[]) {
+  setupResolution(resolve, reject, message) {
+    this.resolve = resolve;
+
+    if(!this.started) {
+      this.start();
+    }
+
+    setTimeout(() => {
+      if(this.resolve) {
+        reject(new Error(`Waiting for timeout reached: ${message}`));
+        this.clear();
+      }
+    }, this.timeout);
+  }
+
+  send(prompt: string, answer?:string | string[], message?:string) {
+    this.prompt = prompt;
+    this.waitingFor = message;
+
     if(Array.isArray(answer)) {
       this.willSend = answer;
     } else if(typeof answer === 'string') {
@@ -75,24 +103,8 @@ export class MockCLIUser {
     if(this.willSend[this.willSend.length - 1] !== '\x0D') {
       this.willSend.push('\x0D');
     }
-  }
 
-  send(prompt: string, answer?:string | string[], message?:string) {
-    this.prompt = prompt;
-    this.waitingFor = message;
-
-    this.setWillSend(answer);
-
-    return new Promise((resolve, reject) => {
-      this.resolve = resolve;
-
-      setTimeout(() => {
-        if(this.resolve) {
-          reject(new Error(`Waiting for timeout reached for: ${prompt}`));
-          this.clear();
-        }
-      }, this.timeout);
-    });
+    return new Promise((resolve, reject) => this.setupResolution(resolve, reject, prompt));
   }
 
   test(tuples:Array<[string] | [string, string] | [string, string, string]>) {
@@ -101,19 +113,15 @@ export class MockCLIUser {
     , Promise.resolve())
   }
 
+  nextMessage(): Promise<string> {
+    this.waitingForNext = true;
+    return new Promise((resolve, reject) => this.setupResolution(resolve, reject, 'Waiting for next message'));
+  }
+
   waitFor(prompt: string): Promise<string> {
     this.waitingFor = prompt;
 
-    return new Promise((resolve, reject) => {
-      this.resolve = resolve
-
-      setTimeout(() => {
-        if(this.resolve) {
-          reject(new Error(`Waiting for timeout reached for: ${prompt}`));
-          this.clear();
-        }
-      }, this.timeout);
-    });
+    return new Promise((resolve, reject) => this.setupResolution(resolve, reject, prompt));
   }
 
   waitTillDone() {
