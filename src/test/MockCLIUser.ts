@@ -1,11 +1,7 @@
 import {ChildProcess, spawn, SpawnOptions} from "child_process";
 import {readStream} from "../funcs/readStream";
 import {Writable} from "stream";
-
-function isPromptSpec(obj:any): obj is PromptSpec {
-  return typeof obj.prompt === 'string'
-    && Array.isArray(obj.willSend);
-}
+import {Tests, TestInputs} from "../types";
 
 export interface MockCLIUserOptions extends SpawnOptions {
   output?: (output: string) => void;
@@ -43,14 +39,13 @@ interface PromptSpec extends Spec {
 
 export class MockCLIUser {
   started: boolean = false;
+  exited: boolean = false;
   controller?:SpecController;
   process: ChildProcess;
   testTimer: NodeJS.Timer;
   options: MockCLIUserOptions;
   specTimeout: number = 1000;
-
   stdoutGen: Generator<string>;
-  stderrGen: Generator<string>
 
   constructor(
     public command: string,
@@ -98,18 +93,9 @@ export class MockCLIUser {
       shell: true,
       ...this.options
     });
-/*
-    this.process.stderr.on('data', (data:Buffer) => {
-      const output = data.toString('utf-8');
-      if(this.options.output) {
-        this.options.output(output);
-      }
-    });
+    this.stdoutGen = readStream(this.process.stdout);
 
-    this.process.stdout.on('data', (data:Buffer) => {
-      const output = data.toString('utf-8');
-
-    });*/
+    this.process.on('exit', () => this.exited = true);
   }
 
   setupController(controller:SpecController) {
@@ -119,8 +105,9 @@ export class MockCLIUser {
       this.start();
     }
 
-    this.stdoutGen = readStream(this.process.stdout);
-    this.stderrGen = readStream(this.process.stderr);
+    if(this.exited) {
+      throw new Error('Process already exited, unable to queue anymore actions');
+    }
 
     if(this.controller.timeout > 0) {
       this.controller.timer = setTimeout(() => {
@@ -135,11 +122,7 @@ export class MockCLIUser {
     return this.readStdout();
   }
 
-  test(tuples:Array<
-    string
-    | [string]
-    | [string, string | string[]]
-  >, options: TestOptions = {}) {
+  test(tuples:TestInputs, options: TestOptions = {}) {
     const clearTimer = () => {
       if(this.testTimer) {
         clearTimeout(this.testTimer);
@@ -148,7 +131,8 @@ export class MockCLIUser {
       this.testTimer = null;
     }
 
-    const tail = tuples.reduce((tail, tuple) =>
+    const commands:Tests = typeof tuples === 'function' ? tuples() : tuples;
+    const tail = commands.reduce((tail, tuple) =>
       tail.then(() => {
         if(typeof tuple === "string") {
           return this.waitFor(tuple);
@@ -163,16 +147,12 @@ export class MockCLIUser {
     tail.then(() => this.waitTillDone());
     tail.finally(() => clearTimer());
 
-
     this.testTimer = setTimeout(() => {
-      if(this.process.connected) {
-        this.process.kill();
-        this.controller = null;
-        throw new Error('Test method timeout reached');
-      }
-
+      this.process.kill(9);
+      this.controller = null;
       this.testTimer = null;
-    }, options.timeout || 10000);
+      throw new Error('Test method timeout reached');
+    }, options.timeout || 120000);
 
     return tail;
   }
@@ -218,7 +198,7 @@ export class MockCLIUser {
         }
       }
 
-      this.setupController({
+      return this.setupController({
         resolve,
         reject,
         timeout: this.specTimeout,
@@ -252,7 +232,7 @@ export class MockCLIUser {
         }
       }
 
-      this.setupController({
+      return this.setupController({
         resolve,
         reject,
         timeout: this.specTimeout,
@@ -264,6 +244,10 @@ export class MockCLIUser {
   waitTillDone() {
     if(!this.started) {
       this.start();
+    }
+
+    if(this.exited) {
+      throw new Error('Process already exited, unable to queue anymore actions');
     }
 
     return new Promise<void>((resolve) => {
