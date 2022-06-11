@@ -1,6 +1,6 @@
 {
-  "name": "@vlegm/utils",
-  "version": "1.0.2",
+  "name": "@cepedaio/utils",
+  "version": "1.0.0",
   "description": "Collection of utility functions used for vlegm projects",
   "main": "dist/index.js",
   "scripts": {
@@ -17,5 +17,8 @@
   },
   "dependencies": {
     "yaml": "^1.10.2"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }
